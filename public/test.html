@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Live Bidding Client</title>
+  <style>
+    /* Your CSS styles */
+    body {
+      font-family: Arial, sans-serif;
+    }
+    #messages {
+      border: 1px solid #ccc;
+      height: 300px;
+      overflow-y: scroll;
+      padding: 10px;
+    }
+    #messages p {
+      margin: 5px 0;
+    }
+    #bidForm {
+      margin-top: 10px;
+    }
+    #bidForm input {
+      padding: 5px;
+      margin-right: 5px;
+    }
+    #bidForm button {
+      padding: 5px 10px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Live Bidding Client</h1>
+
+<div>
+  <label for="auctionSelect">Select Auction:</label>
+  <select id="auctionSelect">
+    <option value="">Loading auctions...</option>
+  </select>
+  <button id="joinAuction" disabled>Join Auction</button>
+</div>
+
+<div id="bidSection" style="display: none;">
+  <div id="messages"></div>
+
+  <form id="bidForm">
+    <input type="number" id="bidAmount" placeholder="Enter your bid amount" required />
+    <button type="submit">Place Bid</button>
+  </form>
+</div>
+
+<!-- Include the Socket.IO client library from the server -->
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+
+  let userId;
+
+  // Receive the userId from the server
+  socket.on('userId', (id) => {
+    userId = id;
+    console.log('Received userId from server:', userId);
+  });
+
+  const auctionSelect = document.getElementById('auctionSelect');
+  const joinAuctionButton = document.getElementById('joinAuction');
+  const bidSection = document.getElementById('bidSection');
+  const messagesDiv = document.getElementById('messages');
+  const bidForm = document.getElementById('bidForm');
+  const bidAmountInput = document.getElementById('bidAmount');
+
+  let auctionId = null;
+
+  // Fetch available auctions from the server
+  fetch('/api/auctions')
+    .then(response => response.json())
+    .then(auctions => {
+      auctionSelect.innerHTML = '';
+      if (auctions.length > 0) {
+        auctions.forEach(auction => {
+          const option = document.createElement('option');
+          option.value = auction.id;
+          option.textContent = `${auction.title} (ID: ${auction.id})`;
+          auctionSelect.appendChild(option);
+        });
+        joinAuctionButton.disabled = false;
+      } else {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No auctions available';
+        auctionSelect.appendChild(option);
+        joinAuctionButton.disabled = true;
+      }
+    })
+    .catch(error => {
+      console.error('Error fetching auctions:', error);
+      auctionSelect.innerHTML = '<option value="">Failed to load auctions</option>';
+      joinAuctionButton.disabled = true;
+    });
+
+  // Event Listeners
+
+  // Listen for errors related to joining the auction
+  socket.on('joinError', (message) => {
+    addMessage(`Error: ${message}`);
+  });
+
+  // Listen for confirmation that the auction has been joined
+  socket.on('joinedAuction', () => {
+    bidSection.style.display = 'block';
+    auctionSelect.disabled = true;
+    joinAuctionButton.disabled = true;
+
+    addMessage(`Joined auction ${auctionId} as ${userId}.`);
+  });
+
+  // Listen for new highest bids
+  socket.on('newHighestBid', (data) => {
+    addMessage(`New highest bid: $${data.bidAmount} by ${data.userId}`);
+  });
+
+  // Listen for auction end
+  socket.on('auctionEnd', (data) => {
+    addMessage(`Auction ${data.auctionId} has ended.`);
+    bidForm.querySelector('button').disabled = true;
+  });
+
+  // Listen for bid errors
+  socket.on('bidError', (message) => {
+    addMessage(`Error: ${message}`);
+  });
+
+  joinAuctionButton.addEventListener('click', () => {
+    auctionId = auctionSelect.value;
+    if (!auctionId) {
+      alert('Please select a valid Auction.');
+      return;
+    }
+
+    // Convert auctionId to integer
+    auctionId = parseInt(auctionId, 10);
+    if (isNaN(auctionId)) {
+      alert('Auction ID must be a number.');
+      return;
+    }
+
+    // Check if userId is received
+    if (!userId) {
+      alert('User ID not received. Please try reconnecting.');
+      return;
+    }
+
+    socket.emit('joinAuction', auctionId);
+  });
+
+  bidForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+
+    // Check if userId is received
+    if (!userId) {
+      alert('User ID not received. Please try reconnecting.');
+      return;
+    }
+
+    const bidAmount = parseFloat(bidAmountInput.value);
+    if (isNaN(bidAmount) || bidAmount <= 0) {
+      alert('Please enter a valid bid amount.');
+      return;
+    }
+
+    socket.emit('placeBid', {
+      auctionId,
+      bidAmount,
+    });
+
+    bidAmountInput.value = '';
+  });
+
+  function addMessage(message) {
+    const p = document.createElement('p');
+    p.textContent = message;
+    messagesDiv.appendChild(p);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+</script>
+
+</body>
+</html>
